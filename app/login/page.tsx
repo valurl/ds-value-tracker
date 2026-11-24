@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Profile } from '@/lib/types';
 import {
@@ -8,9 +9,7 @@ import {
   signInUser,
   signUpUser,
   signOutUser,
-  setDemoCurrentUser,
 } from '@/lib/queries/profiles';
-import { INITIAL_PROFILES } from '@/lib/demoStore';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import {
   User,
@@ -23,7 +22,7 @@ import {
   ArrowRight,
   AlertCircle,
   CheckCircle2,
-  Users,
+  KeyRound,
 } from 'lucide-react';
 
 export default function LoginPage() {
@@ -65,7 +64,7 @@ export default function LoginPage() {
         if (!res.success) {
           setError(res.error || 'Failed to create account.');
         } else {
-          setSuccessMsg('Account created successfully! Welcome to Valoria.');
+          setSuccessMsg('Account created successfully! Welcome to Dinosaur Simulator Trader.');
           await loadCurrentUser();
         }
       } else {
@@ -88,32 +87,25 @@ export default function LoginPage() {
     await signOutUser();
     setCurrentUser(null);
     setSuccessMsg('Signed out successfully.');
-    loadCurrentUser();
-  };
-
-  const handleSwitchDemoUser = (profile: Profile) => {
-    setDemoCurrentUser(profile);
-    setCurrentUser(profile);
-    setSuccessMsg(`Switched active player to @${profile.username}`);
   };
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
       {/* Title */}
       <div className="text-center space-y-2">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
           <Sparkles className="w-3.5 h-3.5" />
-          <span>Trader Authentication & Profile</span>
+          <span>Dinosaur Simulator Trader Authentication</span>
         </div>
         <h1 className="text-3xl sm:text-4xl font-extrabold text-white">
-          Valoria Trader Account
+          Trader Account & Profile
         </h1>
         <p className="text-sm text-zinc-400 max-w-lg mx-auto">
-          Sign in to post trade listings, submit offers, and verify transactions with Row-Level Security protection.
+          Sign in to post Dinosaur Simulator skin trade listings, evaluate W/F/L deals, and submit counter-offers.
         </p>
       </div>
 
-      {/* Connection Mode Banner */}
+      {/* Backend Status Banner */}
       <div
         className={`p-4 rounded-2xl border flex items-center justify-between text-xs ${
           supabaseActive
@@ -124,18 +116,18 @@ export default function LoginPage() {
         <div className="flex items-center gap-2">
           <Database className={`w-4 h-4 ${supabaseActive ? 'text-emerald-400' : 'text-zinc-400'}`} />
           <span>
-            <strong>Auth Backend:</strong>{' '}
+            <strong>Authentication Backend:</strong>{' '}
             {supabaseActive
               ? 'Connected to Live Supabase Postgres'
-              : 'Running in Sandbox Mode (Add NEXT_PUBLIC_SUPABASE_URL and KEY in .env.local for live cloud sync)'}
+              : 'Local Sandbox Authentication Mode'}
           </span>
         </div>
         <span className="font-mono text-[11px] hidden sm:inline">
-          {supabaseActive ? 'Supabase Auth' : 'Demo Local Auth'}
+          {supabaseActive ? 'Supabase Auth' : 'Local Sandbox'}
         </span>
       </div>
 
-      {/* Messages */}
+      {/* Notifications */}
       {error && (
         <div className="p-4 bg-rose-950/60 border border-rose-800 rounded-2xl text-rose-300 text-sm flex items-center gap-3">
           <AlertCircle className="w-5 h-5 shrink-0 text-rose-400" />
@@ -150,8 +142,7 @@ export default function LoginPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-        {/* Auth Form / Active Profile */}
+      <div className="max-w-md mx-auto">
         <div className="bg-zinc-900/90 border border-zinc-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-6">
           {currentUser ? (
             <div className="space-y-6">
@@ -160,30 +151,53 @@ export default function LoginPage() {
                 <img
                   src={currentUser.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${currentUser.username}`}
                   alt={currentUser.username}
-                  className="w-16 h-16 rounded-2xl border-2 border-amber-500/50 bg-zinc-950"
+                  className="w-16 h-16 rounded-2xl border-2 border-emerald-500/50 bg-zinc-950"
                 />
                 <div>
                   <h3 className="text-xl font-bold text-white flex items-center gap-1.5">
                     {currentUser.username}
-                    <ShieldCheck className="w-5 h-5 text-amber-400" />
+                    {currentUser.is_admin ? (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                        ADMIN
+                      </span>
+                    ) : (
+                      <ShieldCheck className="w-5 h-5 text-emerald-400" />
+                    )}
                   </h3>
                   <div className="text-xs text-zinc-400 font-mono mt-0.5">
                     ID: {currentUser.id}
                   </div>
-                  <div className="inline-flex items-center gap-1 mt-1 text-xs font-semibold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                    Reputation Score: {currentUser.reputation} / 150
+                  <div className="inline-flex items-center gap-1 mt-1 text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                    Trader Reputation: {currentUser.reputation} Pts
                   </div>
                 </div>
               </div>
 
+              {currentUser.is_admin && (
+                <div className="p-3 bg-rose-950/40 border border-rose-800 rounded-2xl flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs text-rose-300">
+                    <Lock className="w-4 h-4 text-rose-400" />
+                    <span>Administrator Privileges Active</span>
+                  </div>
+                  <Link
+                    href="/admin"
+                    className="px-3 py-1 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl transition-colors"
+                  >
+                    Admin Panel
+                  </Link>
+                </div>
+              )}
+
               <div className="p-4 bg-zinc-950/70 rounded-2xl border border-zinc-800/80 text-xs space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-zinc-400">Trading Status:</span>
-                  <span className="text-emerald-400 font-bold">Verified Trader</span>
+                  <span className="text-zinc-400">Account Status:</span>
+                  <span className="text-emerald-400 font-bold">Verified DS Trader</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-zinc-400">Account Type:</span>
-                  <span className="text-zinc-200">Merchant Tier</span>
+                  <span className="text-zinc-400">Role:</span>
+                  <span className="text-zinc-200">
+                    {currentUser.is_admin ? 'Database Admin' : 'Community Trader'}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-400">Joined:</span>
@@ -196,9 +210,9 @@ export default function LoginPage() {
               <div className="flex gap-3">
                 <button
                   onClick={() => router.push('/trades')}
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-zinc-950 font-bold text-sm shadow-md transition-all"
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-zinc-950 font-bold text-sm shadow-md transition-all"
                 >
-                  <span>Go to Trading Hub</span>
+                  <span>Go to Trade Hub</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
                 <button
@@ -218,7 +232,7 @@ export default function LoginPage() {
                   type="button"
                   onClick={() => setIsSignUp(false)}
                   className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
-                    !isSignUp ? 'bg-amber-500 text-zinc-950 shadow-md' : 'text-zinc-400 hover:text-white'
+                    !isSignUp ? 'bg-emerald-500 text-zinc-950 shadow-md' : 'text-zinc-400 hover:text-white'
                   }`}
                 >
                   Sign In
@@ -227,7 +241,7 @@ export default function LoginPage() {
                   type="button"
                   onClick={() => setIsSignUp(true)}
                   className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
-                    isSignUp ? 'bg-amber-500 text-zinc-950 shadow-md' : 'text-zinc-400 hover:text-white'
+                    isSignUp ? 'bg-emerald-500 text-zinc-950 shadow-md' : 'text-zinc-400 hover:text-white'
                   }`}
                 >
                   Create Account
@@ -238,7 +252,7 @@ export default function LoginPage() {
                 {isSignUp && (
                   <div>
                     <label className="block text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-1.5">
-                      Trader Username
+                      Roblox / Trader Username
                     </label>
                     <div className="relative">
                       <User className="w-4 h-4 text-zinc-400 absolute left-3.5 top-3" />
@@ -246,8 +260,9 @@ export default function LoginPage() {
                         type="text"
                         value={username}
                         onChange={e => setUsername(e.target.value)}
-                        placeholder="e.g. ShadowKnight"
-                        className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-500 focus:outline-none text-white text-sm"
+                        placeholder="e.g. RexMaster_Roblox"
+                        required
+                        className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-emerald-500 focus:outline-none text-white text-sm"
                       />
                     </div>
                   </div>
@@ -263,9 +278,9 @@ export default function LoginPage() {
                       type="email"
                       value={email}
                       onChange={e => setEmail(e.target.value)}
-                      placeholder="trader@valoria.io"
+                      placeholder="trader@roblox.com"
                       required
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-500 focus:outline-none text-white text-sm"
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-emerald-500 focus:outline-none text-white text-sm"
                     />
                   </div>
                 </div>
@@ -282,7 +297,7 @@ export default function LoginPage() {
                       onChange={e => setPassword(e.target.value)}
                       placeholder="••••••••"
                       required
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-500 focus:outline-none text-white text-sm"
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-emerald-500 focus:outline-none text-white text-sm"
                     />
                   </div>
                 </div>
@@ -290,65 +305,13 @@ export default function LoginPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-zinc-950 font-bold text-sm shadow-[0_0_20px_rgba(245,158,11,0.25)] transition-all disabled:opacity-50"
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-zinc-950 font-bold text-sm shadow-[0_0_20px_rgba(16,185,129,0.25)] transition-all disabled:opacity-50"
                 >
-                  {loading ? 'Processing...' : isSignUp ? 'Register Trader Account' : 'Sign In to Valoria'}
+                  {loading ? 'Processing...' : isSignUp ? 'Register Trader Account' : 'Sign In'}
                 </button>
               </form>
             </div>
           )}
-        </div>
-
-        {/* Sandbox Switcher & Testing Guide */}
-        <div className="space-y-6">
-          <div className="bg-zinc-900/90 border border-zinc-800 rounded-3xl p-6 sm:p-8 shadow-xl space-y-4">
-            <div className="flex items-center gap-2">
-              <Users className="w-5 h-5 text-amber-400" />
-              <h3 className="font-bold text-white text-lg">Switch Demo Trader Persona</h3>
-            </div>
-            <p className="text-xs text-zinc-400 leading-relaxed">
-              Instantly toggle between different player accounts to test both sides of a trade: post as one player, switch personas to submit counter-offers, and switch back to accept offers and verify rolling median price updates!
-            </p>
-
-            <div className="space-y-2.5 pt-2">
-              {INITIAL_PROFILES.map(profile => {
-                const isActive = currentUser?.id === profile.id;
-                return (
-                  <button
-                    key={profile.id}
-                    onClick={() => handleSwitchDemoUser(profile)}
-                    className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between transition-all ${
-                      isActive
-                        ? 'bg-amber-500/10 border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.15)]'
-                        : 'bg-zinc-950/60 border-zinc-800 hover:border-zinc-700'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={profile.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${profile.username}`}
-                        alt={profile.username}
-                        className="w-9 h-9 rounded-xl border border-zinc-700"
-                      />
-                      <div>
-                        <div className="font-bold text-white text-sm flex items-center gap-1">
-                          @{profile.username}
-                          {isActive && <span className="text-[10px] text-amber-400 font-mono">(Active)</span>}
-                        </div>
-                        <div className="text-[11px] text-zinc-400 font-mono">
-                          Reputation: {profile.reputation}
-                        </div>
-                      </div>
-                    </div>
-
-                    <span className="text-xs font-bold text-zinc-400 hover:text-white">
-                      {isActive ? 'Current' : 'Select'}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </div>
       </div>
     </div>

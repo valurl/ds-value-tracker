@@ -15,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Valoria | Game Economy & Item Value Tracker',
+  title: 'DS Value Tracker | Dinosaur Simulator (Roblox) Skin Values & W/F/L Trading',
   description:
-    'Real-time game trading economy, live market listings, and anti-manipulation rolling median item valuations.',
+    'Real-time Dinosaur Simulator Roblox skin point valuations, player-to-player skin trades, and Win/Fair/Loss (W/F/L) calculator.',
 };
 
 export default function RootLayout({
@@ -28,7 +28,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-zinc-950 text-zinc-100 flex flex-col antialiased selection:bg-amber-500 selection:text-zinc-950`}
+        className={`${geistSans.variable} ${geistMono.variable} min-h-screen bg-zinc-950 text-zinc-100 flex flex-col antialiased selection:bg-emerald-500 selection:text-zinc-950`}
       >
         <Navbar />
         <main className="flex-1">{children}</main>

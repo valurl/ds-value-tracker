@@ -2,9 +2,9 @@
 
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { TradeListing, Profile } from '@/lib/types';
+import { TradeListing, Profile, WflVerdict } from '@/lib/types';
 import { getActiveListings } from '@/lib/queries/trades';
-import { getCurrentUserProfile, getDemoCurrentUser } from '@/lib/queries/profiles';
+import { getCurrentUserProfile } from '@/lib/queries/profiles';
 import { TradeListingCard } from '@/components/TradeListingCard';
 import { CreateListingModal } from '@/components/CreateListingModal';
 import { OfferModal } from '@/components/OfferModal';
@@ -13,12 +13,12 @@ import {
   ArrowRightLeft,
   PlusCircle,
   Search,
-  Filter,
-  Sparkles,
-  ShieldAlert,
-  Coins,
   RefreshCw,
+  Scale,
+  ShieldCheck,
+  CheckCircle2,
 } from 'lucide-react';
+import Link from 'next/link';
 
 function TradesHubContent() {
   const searchParams = useSearchParams();
@@ -30,14 +30,14 @@ function TradesHubContent() {
 
   // Filters
   const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'sell' | 'buy'>('all');
+  const [wflFilter, setWflFilter] = useState<WflVerdict | 'all'>('all');
   const [myListingsOnly, setMyListingsOnly] = useState(false);
 
   // Modals state
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [offerModalListing, setOfferModalListing] = useState<TradeListing | null>(null);
 
-  // Notification for accepted trades & rolling median updates
+  // Notification for accepted trades
   const [tradeNotice, setTradeNotice] = useState<{
     itemName: string;
     oldValue: number;
@@ -60,27 +60,36 @@ function TradesHubContent() {
 
   useEffect(() => {
     getCurrentUserProfile().then(p => {
-      if (p) setCurrentUser(p);
-      else setCurrentUser(getDemoCurrentUser());
+      setCurrentUser(p);
     });
     fetchListings();
   }, []);
 
   const filteredListings = useMemo(() => {
     return listings.filter(l => {
-      if (filterItemId && l.item_id !== filterItemId) return false;
-      if (typeFilter !== 'all' && l.listing_type !== typeFilter) return false;
+      if (filterItemId && l.item_id !== filterItemId && !(l.offered_skin_ids || []).includes(filterItemId)) {
+        return false;
+      }
+      if (wflFilter !== 'all' && l.wfl_verdict !== wflFilter) return false;
       if (myListingsOnly && currentUser && l.user_id !== currentUser.id) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
         const itemName = l.item?.name.toLowerCase() || '';
         const username = l.user?.username.toLowerCase() || '';
         const notes = l.notes?.toLowerCase() || '';
-        return itemName.includes(q) || username.includes(q) || notes.includes(q);
+        const wishlist = l.requested_items?.toLowerCase() || '';
+        const skinsList = (l.offered_skins || []).map(s => s.name.toLowerCase()).join(' ');
+        return (
+          itemName.includes(q) ||
+          username.includes(q) ||
+          notes.includes(q) ||
+          wishlist.includes(q) ||
+          skinsList.includes(q)
+        );
       }
       return true;
     });
-  }, [listings, filterItemId, typeFilter, myListingsOnly, currentUser, search]);
+  }, [listings, filterItemId, wflFilter, myListingsOnly, currentUser, search]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -88,25 +97,25 @@ function TradesHubContent() {
       {tradeNotice && (
         <NotificationBanner
           type="success"
-          title={`Trade Accepted & Item Value Updated!`}
-          message={`Accepted offer for ${tradeNotice.itemName} at ${tradeNotice.settledPrice.toLocaleString()} G. Anti-manipulation rolling median adjusted item value from ${tradeNotice.oldValue.toLocaleString()} G to ${tradeNotice.newValue.toLocaleString()} G (Trend: ${tradeNotice.trend.toUpperCase()}).`}
+          title={`Skin Trade Accepted & Point Value Adjusted!`}
+          message={`Accepted trade for ${tradeNotice.itemName} at ${tradeNotice.settledPrice.toLocaleString()} Pts. Community rolling median updated skin point value from ${tradeNotice.oldValue.toLocaleString()} Pts to ${tradeNotice.newValue.toLocaleString()} Pts (Trend: ${tradeNotice.trend.toUpperCase()}).`}
           onClose={() => setTradeNotice(null)}
         />
       )}
 
       {/* Header Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-900/60 p-6 rounded-3xl border border-zinc-800">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-zinc-900/60 p-6 sm:p-8 rounded-3xl border border-zinc-800">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+            <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
               <ArrowRightLeft className="w-5 h-5" />
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold text-white">
-              Live Trading Hub
+              Player Skin Trading Hub (W/F/L)
             </h1>
           </div>
           <p className="text-xs sm:text-sm text-zinc-400">
-            Post sell or buy requests, inspect counter-offers, and trade securely under Postgres Row-Level Security policies.
+            Skin-for-skin trading between Dinosaur Simulator players. View real-time Win / Fair / Loss balances before making offers.
           </p>
         </div>
 
@@ -121,15 +130,15 @@ function TradesHubContent() {
 
           <button
             onClick={() => setCreateModalOpen(true)}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-zinc-950 font-bold text-sm shadow-[0_0_20px_rgba(245,158,11,0.25)] transition-all"
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-zinc-950 font-bold text-sm shadow-[0_0_20px_rgba(16,185,129,0.25)] transition-all"
           >
             <PlusCircle className="w-4 h-4" />
-            <span>Post Trade Listing</span>
+            <span>Post Skin Trade</span>
           </button>
         </div>
       </div>
 
-      {/* Filters & Search Control */}
+      {/* Filters & W/F/L Toggles */}
       <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between">
         <div className="relative flex-1">
           <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-3.5" />
@@ -137,51 +146,61 @@ function TradesHubContent() {
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search listings by item name, trader, or notes..."
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-500 focus:outline-none text-white text-sm"
+            placeholder="Search by skin name, base dino, trader, or wishlist..."
+            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-emerald-500 focus:outline-none text-white text-sm"
           />
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          {/* Type filter */}
+          {/* W/F/L filter pills */}
           <div className="flex items-center p-1 bg-zinc-950 rounded-xl border border-zinc-800">
             <button
-              onClick={() => setTypeFilter('all')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                typeFilter === 'all' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-400 hover:text-white'
+              onClick={() => setWflFilter('all')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                wflFilter === 'all' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'
               }`}
             >
-              All Types
+              All Trades
             </button>
             <button
-              onClick={() => setTypeFilter('sell')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                typeFilter === 'sell' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold' : 'text-zinc-400 hover:text-white'
+              onClick={() => setWflFilter('win')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                wflFilter === 'win' ? 'bg-emerald-600 text-zinc-950 shadow-md' : 'text-emerald-400 hover:text-emerald-300'
               }`}
             >
-              WTS Only
+              🔥 Win
             </button>
             <button
-              onClick={() => setTypeFilter('buy')}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                typeFilter === 'buy' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 font-bold' : 'text-zinc-400 hover:text-white'
+              onClick={() => setWflFilter('fair')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                wflFilter === 'fair' ? 'bg-cyan-600 text-zinc-950 shadow-md' : 'text-cyan-400 hover:text-cyan-300'
               }`}
             >
-              WTB Only
+              ⚖️ Fair
+            </button>
+            <button
+              onClick={() => setWflFilter('open')}
+              className={`px-3 py-1.5 rounded-lg font-bold transition-all ${
+                wflFilter === 'open' ? 'bg-zinc-700 text-white shadow-md' : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Open Offers
             </button>
           </div>
 
           {/* My Listings Toggle */}
-          <button
-            onClick={() => setMyListingsOnly(!myListingsOnly)}
-            className={`px-3 py-2 rounded-xl border transition-all ${
-              myListingsOnly
-                ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 font-bold'
-                : 'bg-zinc-950 text-zinc-400 hover:text-white border-zinc-800'
-            }`}
-          >
-            My Listings ({listings.filter(l => currentUser && l.user_id === currentUser.id).length})
-          </button>
+          {currentUser && (
+            <button
+              onClick={() => setMyListingsOnly(!myListingsOnly)}
+              className={`px-3 py-2 rounded-xl border transition-all ${
+                myListingsOnly
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-bold'
+                  : 'bg-zinc-950 text-zinc-400 hover:text-white border-zinc-800'
+              }`}
+            >
+              My Listings ({listings.filter(l => l.user_id === currentUser.id).length})
+            </button>
+          )}
 
           {filterItemId && (
             <button
@@ -191,24 +210,24 @@ function TradesHubContent() {
                 window.history.replaceState({}, '', url.toString());
                 window.location.reload();
               }}
-              className="px-2.5 py-2 rounded-xl bg-zinc-800 text-amber-400 hover:text-white border border-zinc-700"
+              className="px-2.5 py-2 rounded-xl bg-zinc-800 text-emerald-400 hover:text-white border border-zinc-700"
             >
-              Clear Item Filter ✕
+              Clear Skin Filter ✕
             </button>
           )}
         </div>
       </div>
 
-      {/* RLS Enforcement Notice */}
-      <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-4 flex items-center justify-between text-xs text-zinc-400">
+      {/* RLS & W/F/L Notice */}
+      <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between text-xs text-zinc-400 gap-2">
         <div className="flex items-center gap-2">
-          <ShieldAlert className="w-4 h-4 text-emerald-400 shrink-0" />
+          <Scale className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>
-            <strong>Enforced by Postgres RLS:</strong> Anyone can browse listings and offers. Only logged-in users can place bids. <em>Only the listing creator</em> can accept an offer.
+            <strong>Win / Fair / Loss (W/F/L):</strong> Computed by comparing the cumulative Point Values of offered skins vs requested skins. Deals within ±10% margin are classified as <strong>Fair</strong>.
           </span>
         </div>
-        <span className="font-mono text-zinc-400 hidden sm:inline">
-          Listing Owner Protection Active
+        <span className="font-mono text-zinc-400 shrink-0">
+          Owner-Only Acceptance Enforced
         </span>
       </div>
 
@@ -216,7 +235,7 @@ function TradesHubContent() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
-            <span>Active Listings</span>
+            <span>Active Skin Trades</span>
             <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300">
               {filteredListings.length}
             </span>
@@ -225,24 +244,24 @@ function TradesHubContent() {
 
         {loading ? (
           <div className="space-y-4">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className="h-40 rounded-2xl bg-zinc-900/50 border border-zinc-800 animate-pulse" />
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="h-44 rounded-3xl bg-zinc-900/50 border border-zinc-800 animate-pulse" />
             ))}
           </div>
         ) : filteredListings.length === 0 ? (
-          <div className="text-center py-16 bg-zinc-900/30 rounded-2xl border border-zinc-800 p-8 space-y-4">
-            <Coins className="w-10 h-10 text-zinc-600 mx-auto" />
-            <h3 className="text-lg font-bold text-white">No active listings found</h3>
+          <div className="text-center py-16 bg-zinc-900/30 rounded-3xl border border-zinc-800 p-8 space-y-4">
+            <span className="text-4xl block">🦖</span>
+            <h3 className="text-lg font-bold text-white">No active skin listings found</h3>
             <p className="text-xs sm:text-sm text-zinc-400 max-w-md mx-auto">
               {myListingsOnly
-                ? "You haven't posted any active trade listings yet. Click 'Post Trade Listing' above to get started!"
-                : 'Be the first trader to post an item listing or create a buy request!'}
+                ? "You haven't posted any active skin trade listings yet."
+                : 'Be the first player to post a skin swap listing!'}
             </p>
             <button
               onClick={() => setCreateModalOpen(true)}
-              className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs rounded-xl shadow-md transition-colors"
+              className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-xs rounded-xl shadow-md transition-colors"
             >
-              Post First Listing
+              Post First Skin Trade
             </button>
           </div>
         ) : (
@@ -284,7 +303,7 @@ export default function TradesHubPage() {
     <Suspense
       fallback={
         <div className="max-w-7xl mx-auto px-4 py-12 text-center text-zinc-400">
-          Loading trading hub...
+          Loading Dinosaur Simulator Trading Hub...
         </div>
       }
     >

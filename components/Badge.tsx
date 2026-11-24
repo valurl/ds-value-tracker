@@ -1,6 +1,16 @@
 import React from 'react';
-import { ItemRarity, DemandRating, PriceTrend } from '@/lib/types';
-import { TrendingUp, TrendingDown, Minus, Flame } from 'lucide-react';
+import { ItemRarity, ItemCategory, DemandRating, PriceTrend, WflVerdict } from '@/lib/types';
+import { TrendingUp, TrendingDown, Minus, Flame, Scale, Check, AlertTriangle } from 'lucide-react';
+
+export function formatPoints(num: number): string {
+  if (num >= 1000000) {
+    return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M Pts';
+  }
+  if (num >= 1000) {
+    return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K Pts';
+  }
+  return num.toLocaleString() + ' Pts';
+}
 
 interface RarityBadgeProps {
   rarity: ItemRarity;
@@ -47,7 +57,7 @@ export function RarityBadge({ rarity, size = 'sm' }: RarityBadgeProps) {
     },
   };
 
-  const style = styles[rarity] || styles.Common;
+  const style = styles[rarity] || styles.Rare;
   const sizeClasses = size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-sm';
 
   return (
@@ -55,6 +65,121 @@ export function RarityBadge({ rarity, size = 'sm' }: RarityBadgeProps) {
       className={`inline-flex items-center font-semibold rounded-md border tracking-wide uppercase ${style.bg} ${style.text} ${style.border} ${style.glow} ${sizeClasses}`}
     >
       {rarity}
+    </span>
+  );
+}
+
+interface CategoryBadgeProps {
+  category: ItemCategory;
+}
+
+export function CategoryBadge({ category }: CategoryBadgeProps) {
+  const styles: Record<ItemCategory, { bg: string; text: string; border: string }> = {
+    Limited: {
+      bg: 'bg-rose-950/70',
+      text: 'text-rose-300',
+      border: 'border-rose-700/60',
+    },
+    Event: {
+      bg: 'bg-purple-950/70',
+      text: 'text-purple-300',
+      border: 'border-purple-700/60',
+    },
+    'Albino / Melanistic': {
+      bg: 'bg-zinc-800/90',
+      text: 'text-zinc-200',
+      border: 'border-zinc-600',
+    },
+    'Golden / Diamond': {
+      bg: 'bg-amber-950/80',
+      text: 'text-amber-300',
+      border: 'border-amber-600/70',
+    },
+    'Plush / Toy': {
+      bg: 'bg-pink-950/70',
+      text: 'text-pink-300',
+      border: 'border-pink-700/60',
+    },
+    'Gamepass / Robux': {
+      bg: 'bg-emerald-950/70',
+      text: 'text-emerald-300',
+      border: 'border-emerald-700/60',
+    },
+    'Obtainable / Shop': {
+      bg: 'bg-blue-950/70',
+      text: 'text-blue-300',
+      border: 'border-blue-700/60',
+    },
+  };
+
+  const style = styles[category] || styles.Limited;
+
+  return (
+    <span
+      className={`inline-flex items-center font-medium px-2 py-0.5 text-xs rounded-md border ${style.bg} ${style.text} ${style.border}`}
+    >
+      {category}
+    </span>
+  );
+}
+
+interface WflBadgeProps {
+  verdict: WflVerdict;
+  diff?: number;
+  size?: 'sm' | 'md';
+}
+
+export function WflBadge({ verdict, diff, size = 'sm' }: WflBadgeProps) {
+  const sizeClasses = size === 'sm' ? 'px-2 py-0.5 text-xs' : 'px-3 py-1 text-sm';
+
+  if (verdict === 'win') {
+    return (
+      <span
+        className={`inline-flex items-center gap-1 font-bold rounded-lg bg-emerald-950/80 text-emerald-300 border border-emerald-600/80 shadow-[0_0_12px_rgba(16,185,129,0.25)] ${sizeClasses}`}
+      >
+        <span>🔥 WIN</span>
+        {diff !== undefined && diff > 0 && (
+          <span className="font-mono text-[11px] opacity-90">(+{formatPoints(diff)})</span>
+        )}
+      </span>
+    );
+  }
+
+  if (verdict === 'loss') {
+    return (
+      <span
+        className={`inline-flex items-center gap-1 font-bold rounded-lg bg-rose-950/80 text-rose-300 border border-rose-600/80 shadow-[0_0_12px_rgba(244,63,94,0.25)] ${sizeClasses}`}
+      >
+        <span>🔻 LOSS</span>
+        {diff !== undefined && diff < 0 && (
+          <span className="font-mono text-[11px] opacity-90">({formatPoints(diff)})</span>
+        )}
+      </span>
+    );
+  }
+
+  if (verdict === 'fair') {
+    return (
+      <span
+        className={`inline-flex items-center gap-1 font-bold rounded-lg bg-cyan-950/80 text-cyan-300 border border-cyan-600/80 ${sizeClasses}`}
+      >
+        <Scale className="w-3.5 h-3.5 text-cyan-400" />
+        <span>FAIR</span>
+        {diff !== undefined && Math.abs(diff) > 0 && (
+          <span className="font-mono text-[11px] opacity-90">
+            ({diff > 0 ? '+' : ''}
+            {formatPoints(diff)})
+          </span>
+        )}
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 font-medium rounded-lg bg-zinc-900 text-zinc-400 border border-zinc-700 ${sizeClasses}`}
+    >
+      <span>OPEN OFFERS</span>
     </span>
   );
 }

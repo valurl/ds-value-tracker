@@ -1,10 +1,14 @@
 'use client';
 
-import React, { useState } from 'react';
-import { TradeListing } from '@/lib/types';
+import React, { useState, useEffect } from 'react';
+import { TradeListing, Item } from '@/lib/types';
+import { getItems } from '@/lib/queries/items';
 import { createOffer } from '@/lib/queries/offers';
-import { getDemoCurrentUser } from '@/lib/queries/profiles';
-import { X, Coins, Sparkles, AlertCircle } from 'lucide-react';
+import { getCurrentUserProfile } from '@/lib/queries/profiles';
+import { calculateWfl } from '@/lib/queries/trades';
+import { WflBadge, formatPoints, RarityBadge } from './Badge';
+import { X, ArrowRightLeft, Sparkles, AlertCircle, Scale, Check } from 'lucide-react';
+import Link from 'next/link';
 
 interface OfferModalProps {
   listing: TradeListing;
@@ -14,48 +18,70 @@ interface OfferModalProps {
 }
 
 export function OfferModal({ listing, isOpen, onClose, onOfferSubmitted }: OfferModalProps) {
-  const [offeredPrice, setOfferedPrice] = useState<string>(
-    listing.requested_price ? listing.requested_price.toString() : ''
-  );
-  const [offeredItems, setOfferedItems] = useState('');
+  const [items, setItems] = useState<Item[]>([]);
+  const [selectedSkinIds, setSelectedSkinIds] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    getItems().then(fetched => setItems(fetched));
+    getCurrentUserProfile().then(p => setUser(p));
+  }, []);
 
   if (!isOpen) return null;
+
+  // Calculate Point Values
+  const offeredSkins = items.filter(i => selectedSkinIds.includes(i.id));
+  const myOfferedTotal = offeredSkins.reduce((sum, s) => sum + s.current_value, 0);
+
+  // Receiving skins total
+  const receivingTotal = listing.offered_total_value || listing.requested_price || 0;
+
+  // W/F/L calculation for the offerer (giving myOfferedTotal, receiving receivingTotal)
+  const { verdict, diff, percent } = calculateWfl(myOfferedTotal, receivingTotal);
+
+  const toggleSkinSelection = (id: string) => {
+    if (selectedSkinIds.includes(id)) {
+      setSelectedSkinIds(selectedSkinIds.filter(s => s !== id));
+    } else {
+      setSelectedSkinIds([...selectedSkinIds, id]);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    const priceNum = offeredPrice ? parseFloat(offeredPrice) : undefined;
-    if ((priceNum === undefined || isNaN(priceNum) || priceNum <= 0) && !offeredItems.trim()) {
-      setError('Please provide an offered gold price or barter items.');
+    if (!user) {
+      setError('Please sign in to make trade offers.');
+      return;
+    }
+
+    if (user.id === listing.user_id) {
+      setError('You cannot make an offer on your own trade listing.');
+      return;
+    }
+
+    if (selectedSkinIds.length === 0) {
+      setError('Please select at least 1 skin to offer.');
       return;
     }
 
     try {
       setLoading(true);
-      const currentUser = getDemoCurrentUser();
-
-      if (currentUser.id === listing.user_id) {
-        setError('You cannot make an offer on your own listing.');
-        setLoading(false);
-        return;
-      }
-
       await createOffer({
         listing_id: listing.id,
-        offerer_id: currentUser.id,
-        offered_price: priceNum,
-        offered_items: offeredItems.trim() || undefined,
+        offerer_id: user.id,
+        offered_skin_ids: selectedSkinIds,
         notes: notes.trim() || undefined,
       });
 
       onOfferSubmitted();
       onClose();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to submit offer';
+      const message = err instanceof Error ? err.message : 'Failed to submit skin offer';
       setError(message);
     } finally {
       setLoading(false);
@@ -64,12 +90,12 @@ export function OfferModal({ listing, isOpen, onClose, onOfferSubmitted }: Offer
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-3xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200">
         {/* Modal Header */}
-        <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/60">
+        <div className="px-6 py-4 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/60 shrink-0">
           <div className="flex items-center gap-2">
-            <Coins className="w-5 h-5 text-amber-400" />
-            <h3 className="font-bold text-white text-lg">Submit Trade Offer</h3>
+            <ArrowRightLeft className="w-5 h-5 text-emerald-400" />
+            <h3 className="font-bold text-white text-lg">Offer Skins for Trade</h3>
           </div>
           <button
             onClick={onClose}
@@ -79,30 +105,59 @@ export function OfferModal({ listing, isOpen, onClose, onOfferSubmitted }: Offer
           </button>
         </div>
 
-        {/* Target Item Snapshot */}
-        <div className="p-6 space-y-5">
-          <div className="bg-zinc-950/70 p-3.5 rounded-xl border border-zinc-800/80 flex items-center gap-3">
-            {listing.item?.image_url && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={listing.item.image_url}
-                alt={listing.item.name}
-                className="w-12 h-12 rounded-lg object-cover border border-zinc-700"
-              />
-            )}
-            <div className="flex-1 min-w-0">
-              <h4 className="font-bold text-sm text-white truncate">{listing.item?.name}</h4>
-              <p className="text-xs text-zinc-400">
-                Seller: <span className="text-zinc-200">@{listing.user?.username}</span> • Asking:{' '}
-                <span className="text-amber-400 font-semibold font-mono">
-                  {listing.requested_price ? `${listing.requested_price.toLocaleString()} G` : 'Open Offer'}
+        {/* Modal Scrollable Content */}
+        <div className="p-6 space-y-5 overflow-y-auto flex-1">
+          {/* Target Listing Target */}
+          <div className="bg-zinc-950/70 p-4 rounded-2xl border border-zinc-800/80 space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-zinc-400 font-mono">You Are Bidding On:</span>
+              <span className="font-mono text-emerald-400 font-bold">
+                Value: {formatPoints(receivingTotal)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {(listing.offered_skins || [listing.item]).map((skin, i) => (
+                <span
+                  key={skin?.id || i}
+                  className="px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-700 text-xs text-white font-medium flex items-center gap-1.5"
+                >
+                  <span>{skin?.name}</span>
+                  <span className="text-emerald-400 font-mono text-[11px]">
+                    ({skin ? formatPoints(skin.current_value) : ''})
+                  </span>
                 </span>
+              ))}
+            </div>
+            {listing.requested_items && (
+              <p className="text-xs text-cyan-400 pt-1 border-t border-zinc-800/60">
+                Seller Wishlist: {listing.requested_items}
               </p>
-              {listing.requested_items && (
-                <p className="text-xs text-cyan-400 mt-0.5 truncate">
-                  Wishlist: {listing.requested_items}
-                </p>
-              )}
+            )}
+          </div>
+
+          {/* Live W/F/L Calculation Box */}
+          <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-mono text-zinc-400 flex items-center gap-1">
+                <Scale className="w-3.5 h-3.5 text-emerald-400" />
+                Trade Balance (W/F/L):
+              </span>
+              <WflBadge verdict={verdict} diff={diff} size="md" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-800/80 text-xs font-mono">
+              <div className="bg-zinc-900/60 p-2 rounded-xl">
+                <span className="text-zinc-400 block text-[11px]">You Give (Skins):</span>
+                <span className="font-bold text-white text-sm">
+                  {myOfferedTotal.toLocaleString()} Pts
+                </span>
+              </div>
+              <div className="bg-zinc-900/60 p-2 rounded-xl">
+                <span className="text-zinc-400 block text-[11px]">You Receive (Skins):</span>
+                <span className="font-bold text-emerald-400 text-sm">
+                  {receivingTotal.toLocaleString()} Pts
+                </span>
+              </div>
             </div>
           </div>
 
@@ -113,76 +168,91 @@ export function OfferModal({ listing, isOpen, onClose, onOfferSubmitted }: Offer
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Offered Gold */}
-            <div>
-              <label className="block text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-1.5">
-                Offered Gold Value (G)
-              </label>
-              <div className="relative">
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={offeredPrice}
-                  onChange={e => setOfferedPrice(e.target.value)}
-                  placeholder="e.g. 8500"
-                  className="w-full px-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-500 focus:outline-none text-white text-sm font-mono"
-                />
-                <span className="absolute right-3.5 top-2.5 text-xs text-zinc-500 font-mono">GOLD</span>
-              </div>
-              <p className="text-[11px] text-zinc-400 mt-1">
-                Settled trade prices update the item&apos;s rolling median economy value.
-              </p>
+          {!user && (
+            <div className="p-3 bg-amber-950/40 border border-amber-800/80 rounded-xl text-amber-200 text-xs flex items-center justify-between">
+              <span>Sign in with your trader account to submit offers.</span>
+              <Link href="/login" className="px-3 py-1 bg-amber-500 text-zinc-950 font-bold rounded-lg">
+                Sign In
+              </Link>
             </div>
+          )}
 
-            {/* Offered Barter Items */}
-            <div>
-              <label className="block text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-1.5">
-                Offered Items / Barter Goods (Optional)
-              </label>
-              <input
-                type="text"
-                value={offeredItems}
-                onChange={e => setOfferedItems(e.target.value)}
-                placeholder="e.g. Chrono Shard x1 + 50 Titanium Ingots"
-                className="w-full px-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-500 focus:outline-none text-white text-sm"
-              />
-            </div>
+          {/* Select Skins to Offer */}
+          <div>
+            <label className="block text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-2">
+              Select Skins to Offer ({selectedSkinIds.length} selected)
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto p-1 border border-zinc-800 rounded-2xl bg-zinc-950/80">
+              {items.map(skin => {
+                const isSelected = selectedSkinIds.includes(skin.id);
+                return (
+                  <button
+                    key={skin.id}
+                    type="button"
+                    onClick={() => toggleSkinSelection(skin.id)}
+                    className={`p-2.5 rounded-xl border text-left flex items-center justify-between transition-all ${
+                      isSelected
+                        ? 'bg-emerald-950/60 border-emerald-500 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                        : 'bg-zinc-900/60 border-zinc-800 hover:border-zinc-700'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1 pr-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-mono text-zinc-400">[{skin.base_dinosaur}]</span>
+                        <RarityBadge rarity={skin.rarity} size="sm" />
+                      </div>
+                      <h5 className="font-bold text-xs text-white truncate mt-0.5">{skin.name}</h5>
+                      <span className="font-mono text-xs text-emerald-400 font-bold">
+                        {skin.current_value.toLocaleString()} Pts
+                      </span>
+                    </div>
 
-            {/* Notes */}
-            <div>
-              <label className="block text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-1.5">
-                Message to Seller (Optional)
-              </label>
-              <textarea
-                rows={2}
-                value={notes}
-                onChange={e => setNotes(e.target.value)}
-                placeholder="Can trade right now at Valoria Plaza..."
-                className="w-full px-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-amber-500 focus:outline-none text-white text-sm resize-none"
-              />
+                    <div
+                      className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 border ${
+                        isSelected ? 'bg-emerald-500 border-emerald-400 text-zinc-950' : 'border-zinc-700 bg-zinc-950'
+                      }`}
+                    >
+                      {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
+          </div>
 
-            {/* Action Buttons */}
-            <div className="pt-2 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-sm text-zinc-400 hover:text-white rounded-xl hover:bg-zinc-800 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={loading}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-zinc-950 font-bold text-sm shadow-[0_0_15px_rgba(245,158,11,0.25)] transition-all disabled:opacity-50"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>{loading ? 'Submitting...' : 'Send Offer'}</span>
-              </button>
-            </div>
-          </form>
+          {/* Notes */}
+          <div>
+            <label className="block text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-1.5">
+              Message to Seller (Optional)
+            </label>
+            <textarea
+              rows={2}
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+              placeholder="e.g. Willing to add smaller event skin if needed..."
+              className="w-full px-4 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-emerald-500 focus:outline-none text-white text-sm resize-none"
+            />
+          </div>
+        </div>
+
+        {/* Modal Actions */}
+        <div className="p-4 px-6 border-t border-zinc-800 bg-zinc-950/60 flex items-center justify-end gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm text-zinc-400 hover:text-white rounded-xl hover:bg-zinc-800 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={loading || selectedSkinIds.length === 0 || !user}
+            onClick={handleSubmit}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-zinc-950 font-bold text-sm shadow-[0_0_15px_rgba(16,185,129,0.25)] transition-all disabled:opacity-50"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>{loading ? 'Submitting...' : 'Send Skin Offer'}</span>
+          </button>
         </div>
       </div>
     </div>

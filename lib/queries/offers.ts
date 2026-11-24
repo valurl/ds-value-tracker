@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-import { TradeOffer, CompletedTradeRecord } from '@/lib/types';
+import { TradeOffer, CompletedTradeRecord, Item, WflVerdict } from '@/lib/types';
 import { INITIAL_OFFERS, INITIAL_PROFILES, calculateRollingMedian } from '@/lib/demoStore';
 import { getItems, saveLocalItems } from './items';
 import {
@@ -7,6 +7,7 @@ import {
   saveLocalListings,
   getLocalCompletedTrades,
   saveLocalCompletedTrades,
+  calculateWfl,
 } from './trades';
 
 const OFFERS_STORAGE_KEY = 'ds_trade_offers_cache';
@@ -35,6 +36,8 @@ export function saveLocalOffers(offers: TradeOffer[]): void {
 }
 
 export async function getOffersForListing(listingId: string): Promise<TradeOffer[]> {
+  const items = await getItems();
+
   if (isSupabaseConfigured()) {
     const { data, error } = await supabase
       .from('trade_offers')
@@ -47,26 +50,35 @@ export async function getOffersForListing(listingId: string): Promise<TradeOffer
 
     if (error) {
       console.error('Supabase getOffersForListing error:', error);
-      return attachOfferProfiles(getLocalOffers().filter(o => o.listing_id === listingId));
+      return attachOfferDetails(getLocalOffers().filter(o => o.listing_id === listingId), items);
     }
-    return (data as TradeOffer[]) || [];
+    return attachOfferDetails((data as TradeOffer[]) || [], items);
   }
 
-  return attachOfferProfiles(getLocalOffers().filter(o => o.listing_id === listingId));
+  return attachOfferDetails(getLocalOffers().filter(o => o.listing_id === listingId), items);
 }
 
 export async function createOffer(payload: {
   listing_id: string;
   offerer_id: string;
-  offered_price?: number;
-  offered_items?: string;
+  offered_skin_ids: string[];
   notes?: string;
 }): Promise<TradeOffer> {
+  const items = await getItems();
+  const offeredSkins = items.filter(i => payload.offered_skin_ids.includes(i.id));
+  const totalValue = offeredSkins.reduce((sum, s) => sum + s.current_value, 0);
+  const skinNames = offeredSkins.map(s => s.name).join(', ');
+
   if (isSupabaseConfigured()) {
     const { data, error } = await supabase
       .from('trade_offers')
       .insert({
-        ...payload,
+        listing_id: payload.listing_id,
+        offerer_id: payload.offerer_id,
+        offered_skin_ids: payload.offered_skin_ids,
+        offered_price: totalValue,
+        offered_items: skinNames,
+        notes: payload.notes,
         status: 'pending',
       })
       .select(`
@@ -79,7 +91,7 @@ export async function createOffer(payload: {
       console.error('Supabase createOffer error:', error);
       throw error;
     }
-    return data;
+    return attachOfferDetails([data as TradeOffer], items)[0];
   }
 
   // Local storage creation
@@ -88,8 +100,9 @@ export async function createOffer(payload: {
     id: 'offer-' + Date.now(),
     listing_id: payload.listing_id,
     offerer_id: payload.offerer_id,
-    offered_price: payload.offered_price,
-    offered_items: payload.offered_items,
+    offered_skin_ids: payload.offered_skin_ids,
+    offered_price: totalValue,
+    offered_items: skinNames,
     notes: payload.notes,
     status: 'pending',
     created_at: new Date().toISOString(),
@@ -98,18 +111,10 @@ export async function createOffer(payload: {
   const updated = [newOffer, ...offers];
   saveLocalOffers(updated);
 
-  const [attached] = attachOfferProfiles([newOffer]);
+  const [attached] = attachOfferDetails([newOffer], items);
   return attached;
 }
 
-/**
- * Accept an offer:
- * 1. Checks that caller is the listing owner (RLS rule in Supabase, and verified locally).
- * 2. Marks the offer as 'accepted'.
- * 3. Marks the listing as 'completed'.
- * 4. Rejects other pending offers on the same listing.
- * 5. Triggers rolling median calculation to update item's current_value without single-trade manipulation.
- */
 export async function acceptOffer(
   offerId: string,
   listingId: string,
@@ -122,8 +127,6 @@ export async function acceptOffer(
   settledPrice: number;
 }> {
   if (isSupabaseConfigured()) {
-    // In Supabase, updating the offer's status to 'accepted' triggers the DB function `on_trade_offer_accepted`
-    // which calculates rolling median, completes listing, rejects others, and updates item value atomically!
     const { data: updatedOffer, error } = await supabase
       .from('trade_offers')
       .update({
@@ -140,7 +143,6 @@ export async function acceptOffer(
       throw error;
     }
 
-    // Refresh updated item data
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const itemData = (updatedOffer as any)?.listing?.item;
     return {
@@ -152,35 +154,30 @@ export async function acceptOffer(
     };
   }
 
-  // Local calculation & verification
+  // Local verification
   const listings = getLocalListings();
   const listing = listings.find(l => l.id === listingId);
-  if (!listing) {
-    throw new Error('Listing not found');
-  }
+  if (!listing) throw new Error('Listing not found');
 
-  // Strict ownership check
   if (listing.user_id !== callerUserId) {
     throw new Error('Unauthorized: Only the listing owner can accept offers.');
   }
 
   const offers = getLocalOffers();
   const targetOfferIndex = offers.findIndex(o => o.id === offerId && o.listing_id === listingId);
-  if (targetOfferIndex === -1) {
-    throw new Error('Offer not found');
-  }
+  if (targetOfferIndex === -1) throw new Error('Offer not found');
 
   const targetOffer = offers[targetOfferIndex];
-  const settledPrice = targetOffer.offered_price || listing.requested_price || 0;
+  const settledPoints = targetOffer.offered_price || listing.requested_price || 0;
 
-  // 1. Mark target offer accepted
+  // 1. Mark accepted
   offers[targetOfferIndex] = {
     ...targetOffer,
     status: 'accepted',
     responded_at: new Date().toISOString(),
   };
 
-  // 2. Reject other offers for this listing
+  // 2. Reject others
   offers.forEach((o, i) => {
     if (o.listing_id === listingId && o.id !== offerId && o.status === 'pending') {
       offers[i] = {
@@ -203,7 +200,7 @@ export async function acceptOffer(
     saveLocalListings(listings);
   }
 
-  // 4. Update Item Rolling Median
+  // 4. Update rolling median
   const items = await getItems();
   const itemIndex = items.findIndex(i => i.id === listing.item_id);
   let oldValue = 0;
@@ -214,16 +211,12 @@ export async function acceptOffer(
     const item = items[itemIndex];
     oldValue = item.current_value;
 
-    // Fetch all historical accepted trade prices for this item
     const completedTrades = getLocalCompletedTrades();
     const itemHistoricalPrices = completedTrades
       .filter(t => t.item_id === item.id)
       .map(t => t.settled_price);
 
-    // Add this new trade to the price history
-    const allRecentPrices = [settledPrice, ...itemHistoricalPrices];
-
-    // Compute anti-manipulation rolling median
+    const allRecentPrices = [settledPoints, ...itemHistoricalPrices];
     newValue = calculateRollingMedian(item.base_value, allRecentPrices);
 
     if (newValue > oldValue) newTrend = 'up';
@@ -239,22 +232,22 @@ export async function acceptOffer(
     };
     saveLocalItems(items);
 
-    // 5. Record to completed trades
-    const seller = INITIAL_PROFILES.find(p => p.id === listing.user_id)?.username || 'Seller';
+    const seller = INITIAL_PROFILES.find(p => p.id === listing.user_id)?.username || 'Trader';
     const buyer = INITIAL_PROFILES.find(p => p.id === targetOffer.offerer_id)?.username || 'Buyer';
-
     const diffPct = oldValue > 0 ? ((newValue - oldValue) / oldValue) * 100 : 0;
+
     const newRecord: CompletedTradeRecord = {
       id: 'comp-' + Date.now(),
       listing_id: listing.id,
       item_id: item.id,
       item_name: item.name,
+      base_dinosaur: item.base_dinosaur,
       item_rarity: item.rarity,
       item_category: item.category,
       item_image: item.image_url,
       seller_username: seller,
       buyer_username: buyer,
-      settled_price: settledPrice,
+      settled_price: settledPoints,
       offered_items: targetOffer.offered_items,
       settled_at: new Date().toISOString(),
       previous_item_value: oldValue,
@@ -270,7 +263,7 @@ export async function acceptOffer(
     oldValue,
     newValue,
     trend: newTrend,
-    settledPrice,
+    settledPrice: settledPoints,
   };
 }
 
@@ -316,18 +309,42 @@ export async function rejectOffer(
   return false;
 }
 
-function attachOfferProfiles(offers: TradeOffer[]): TradeOffer[] {
+function attachOfferDetails(offers: TradeOffer[], items: Item[]): TradeOffer[] {
+  const listings = getLocalListings();
+
   return offers.map(o => {
     const offerer = INITIAL_PROFILES.find(p => p.id === o.offerer_id) || {
       id: o.offerer_id,
-      username: 'Trader_' + o.offerer_id.slice(-4),
+      username: 'DinoTrader_' + o.offerer_id.slice(-4),
       avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${o.offerer_id}`,
       reputation: 100,
+      is_admin: false,
       created_at: new Date().toISOString(),
     };
+
+    const offeredSkinIds = o.offered_skin_ids || [];
+    const offeredSkins = items.filter(i => offeredSkinIds.includes(i.id));
+    const offeredTotal = offeredSkins.reduce((sum, s) => sum + s.current_value, 0) || o.offered_price || 0;
+
+    // Resolve target listing to evaluate W/F/L for the listing owner
+    const listing = listings.find(l => l.id === o.listing_id);
+    let verdict: WflVerdict = 'fair';
+    let diff = 0;
+
+    if (listing && listing.requested_price) {
+      // Listing owner receives offeredTotal, gives requested_price
+      const wfl = calculateWfl(listing.requested_price, offeredTotal);
+      verdict = wfl.verdict;
+      diff = wfl.diff;
+    }
+
     return {
       ...o,
       offerer,
+      offered_skins: offeredSkins,
+      offered_total_value: offeredTotal,
+      wfl_verdict: verdict,
+      wfl_diff: diff,
     };
   });
 }
