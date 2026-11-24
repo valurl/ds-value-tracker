@@ -1,6 +1,6 @@
 -- ==============================================================================
 -- Game Economy & Item Value Tracker Database Schema
--- Compatible with Supabase Postgres
+-- Fully compatible and idempotent for Supabase Postgres
 -- ==============================================================================
 
 -- Enable UUID extension
@@ -100,15 +100,17 @@ create index if not exists idx_trade_offers_status on public.trade_offers(status
 -- ------------------------------------------------------------------------------
 -- 5. ANTI-MANIPULATION ROLLING MEDIAN VALUE CALCULATION
 -- ------------------------------------------------------------------------------
--- Problem: Single fraudulent or outlier trades shouldn't artificially inflate/crash item values.
--- Solution: Calculate rolling median over the last N (up to 10) settled trade prices.
--- When fewer than 3 trades exist, anchor with base_value seeds to ensure stability.
+-- Calculates rolling median over the last N (up to 10) settled trade prices.
+-- When fewer than 3 trades exist, anchor with base_value seeds to prevent 1-trade manipulation.
 create or replace function public.calculate_item_rolling_median(p_item_id uuid)
 returns numeric as $$
 declare
   v_median numeric;
   v_count integer;
+  v_base numeric;
 begin
+  select coalesce(base_value, 0) into v_base from public.items where id = p_item_id;
+
   -- Count valid accepted completed trades for this item
   select count(*) into v_count
   from (
@@ -121,13 +123,11 @@ begin
       and coalesce(o.offered_price, l.requested_price) > 0
     order by coalesce(o.responded_at, o.created_at) desc
     limit 10
-  ) recent_trades;
+  ) recent_count;
 
   if v_count >= 3 then
-    -- Established trade history: Compute pure rolling median over the last 10 trades
-    select percentile_cont(0.5) within group (order by trade_price)
-    into v_median
-    from (
+    -- Established trade history: Compute rolling median over the last up to 10 trades
+    with recent_trades as (
       select coalesce(o.offered_price, l.requested_price) as trade_price
       from public.trade_offers o
       join public.trade_listings l on o.listing_id = l.id
@@ -137,12 +137,13 @@ begin
         and coalesce(o.offered_price, l.requested_price) > 0
       order by coalesce(o.responded_at, o.created_at) desc
       limit 10
-    ) recent_trades;
+    )
+    select percentile_cont(0.5) within group (order by trade_price)
+    into v_median
+    from recent_trades;
   else
     -- Low volume/new item: Anchor median with base_value seeds to prevent 1-trade manipulation
-    select percentile_cont(0.5) within group (order by trade_price)
-    into v_median
-    from (
+    with recent_trades as (
       select coalesce(o.offered_price, l.requested_price) as trade_price
       from public.trade_offers o
       join public.trade_listings l on o.listing_id = l.id
@@ -152,14 +153,20 @@ begin
         and coalesce(o.offered_price, l.requested_price) > 0
       order by coalesce(o.responded_at, o.created_at) desc
       limit 10
+    ),
+    anchored_trades as (
+      select trade_price from recent_trades
       union all
-      select base_value from public.items where id = p_item_id
+      select v_base as trade_price
       union all
-      select base_value from public.items where id = p_item_id
-    ) anchored_trades;
+      select v_base as trade_price
+    )
+    select percentile_cont(0.5) within group (order by trade_price)
+    into v_median
+    from anchored_trades;
   end if;
 
-  return round(coalesce(v_median, 0), 2);
+  return round(coalesce(v_median, v_base, 0)::numeric, 2);
 end;
 $$ language plpgsql security definer;
 
@@ -244,65 +251,65 @@ alter table public.trade_listings enable row level security;
 alter table public.trade_offers enable row level security;
 
 -- PROFILES POLICIES
--- Anyone can view user profiles
+drop policy if exists "Public profiles are viewable by everyone" on public.profiles;
 create policy "Public profiles are viewable by everyone"
   on public.profiles for select
   using (true);
 
--- Authenticated users can insert their own profile
+drop policy if exists "Users can insert their own profile" on public.profiles;
 create policy "Users can insert their own profile"
   on public.profiles for insert
   with check (auth.uid() = id);
 
--- Users can update their own profile
+drop policy if exists "Users can update their own profile" on public.profiles;
 create policy "Users can update their own profile"
   on public.profiles for update
   using (auth.uid() = id);
 
 -- ITEMS POLICIES
--- Anyone can view items (read-only economy values)
+drop policy if exists "Items are publicly viewable by everyone" on public.items;
 create policy "Items are publicly viewable by everyone"
   on public.items for select
   using (true);
 
--- Authenticated users can insert new item suggestions
+drop policy if exists "Authenticated users can create items" on public.items;
 create policy "Authenticated users can create items"
   on public.items for insert
   with check (auth.role() = 'authenticated');
 
--- Items values are updated automatically via database triggers
+drop policy if exists "Authenticated users can update items" on public.items;
 create policy "Authenticated users can update items"
   on public.items for update
   using (auth.role() = 'authenticated');
 
 -- TRADE LISTINGS POLICIES
--- Anyone can read all listings (active, completed, cancelled)
+drop policy if exists "Listings are publicly viewable by everyone" on public.trade_listings;
 create policy "Listings are publicly viewable by everyone"
   on public.trade_listings for select
   using (true);
 
--- Logged-in users can post listings
+drop policy if exists "Authenticated users can post listings" on public.trade_listings;
 create policy "Authenticated users can post listings"
   on public.trade_listings for insert
   with check (auth.uid() = user_id);
 
--- Listing owners can update/edit their listings
+drop policy if exists "Listing owners can update their listings" on public.trade_listings;
 create policy "Listing owners can update their listings"
   on public.trade_listings for update
   using (auth.uid() = user_id);
 
--- Listing owners can delete/cancel their listings
+drop policy if exists "Listing owners can delete their listings" on public.trade_listings;
 create policy "Listing owners can delete their listings"
   on public.trade_listings for delete
   using (auth.uid() = user_id);
 
 -- TRADE OFFERS POLICIES
--- Anyone can read offers for transparency in completed and active markets
+drop policy if exists "Offers are publicly viewable by everyone" on public.trade_offers;
 create policy "Offers are publicly viewable by everyone"
   on public.trade_offers for select
   using (true);
 
--- Logged-in users can post offers (cannot make offer on own listing)
+drop policy if exists "Authenticated users can post offers" on public.trade_offers;
 create policy "Authenticated users can post offers"
   on public.trade_offers for insert
   with check (
@@ -312,6 +319,7 @@ create policy "Authenticated users can post offers"
 
 -- STRICT RLS RULE: Only listing owners can accept or reject offers,
 -- or offerers can cancel their own pending offer
+drop policy if exists "Only listing owner can accept/reject offers, offerer can cancel" on public.trade_offers;
 create policy "Only listing owner can accept/reject offers, offerer can cancel"
   on public.trade_offers for update
   using (
@@ -327,7 +335,7 @@ create policy "Only listing owner can accept/reject offers, offerer can cancel"
     )
   );
 
--- Offerers can withdraw/delete their pending offer
+drop policy if exists "Offerers can delete their pending offer" on public.trade_offers;
 create policy "Offerers can delete their pending offer"
   on public.trade_offers for delete
   using (offerer_id = auth.uid() and status = 'pending');
